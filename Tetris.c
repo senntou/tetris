@@ -9,6 +9,7 @@
 #define BLOCK_HEIGHT 20
 #define SYSTEM_CYCLE 16667
 #define GAME_CYCLE 30
+#define FILE_NAME "score.txt"
 
 typedef enum {
     RESETTING,
@@ -22,8 +23,9 @@ int blockGrid[BLOCK_HEIGHT][BLOCK_WIDTH];
 int game_counter = 0;
 Situation situation = RESETTING;
 int deletedFlag[BLOCK_HEIGHT];
-
-int debug_msg[10];
+int changeMinoFlag = 0;
+int score = 0;
+int highScore = 0;
 
 char getPushedKey(){
     struct termios trm_save,trm;
@@ -56,6 +58,8 @@ typedef struct mino{
 } Mino;
 // player
 Mino mino;
+Mino next;
+Mino save;
 // template
 Mino imino;
 Mino omino;
@@ -65,6 +69,7 @@ Mino lmino;
 Mino smino;
 Mino zmino;
 
+void updateRandomMino();
 void initializeMino(Mino* mino,int* grid,int width){
     mino->width = width;
     mino->grid = (int*)malloc(sizeof(int) * (width * width));
@@ -151,7 +156,8 @@ void initializeAllMino(){
         };
         initializeMino(&zmino,grid,3);
     }
-
+    save.width = -1;
+    updateRandomMino();
 }
 void copyMino(Mino* a,Mino* b){
     a->width = b->width;
@@ -166,24 +172,95 @@ void copyMino(Mino* a,Mino* b){
         a->grid[i] = b->grid[i];
     }
 }
+void readScore(){
+    // ファイルからスコアを読み取る
+    FILE *fp;
+    fp = fopen(FILE_NAME,"r");
+    if(fp == NULL) return ;
+    fscanf(fp,"%d",&highScore);
+    fclose(fp);
+}
+void saveScore(){
+    if(highScore < score){
+        highScore = score;
+        FILE* fp = fopen(FILE_NAME,"w");
+        if(fp == NULL) {
+            printf("エラー：ファイルを開けません");
+            exit(1);
+        }
+        fprintf(fp,"%d\n",highScore);
+        fclose(fp);
+    }    
+    return ;
+}
+// ミノをdx,dyだけ動かした場合に、壁やブロックと重なるかどうか判定
+int  checkMinoOver(int dx,int dy){
+    for(int i = 0;i < mino.width;i++){
+        for(int j = 0;j < mino.width;j++){
+            if(!mino.grid[i*mino.width + j]) continue;
+            int y = mino.y + i + dy;
+            int x = mino.x + j + dx;
+            if(x < 0 || BLOCK_WIDTH <= x) return 1;
+            if(y >= BLOCK_HEIGHT) return 1;
+            if(blockGrid[y][x]) return 1;
+        }
+    }
+    return 0;
+}
+int getDistanceToLand(){
+    int counter = 0;
+    while(1){
+        if(checkMinoOver(0,counter)) break;
+        counter++;
+    }
+    counter--;
+    return counter;
+}
 void printGame(){
     system("clear");  // Unix環境
+    int dist = getDistanceToLand();
     for(int i = 0;i <= BLOCK_HEIGHT ;i++){
         printf("%2d ",i);
         for(int j = -1;j <= BLOCK_WIDTH;j++){
             int y = i - mino.y;
             int x = j - mino.x;
+            // 壁表示
             if(i == BLOCK_HEIGHT  || j == -1 || j == BLOCK_WIDTH) printf("■ ");
+            // ブロック
             else if(0 <= i && i < BLOCK_HEIGHT && 
                     0 <= j && j < BLOCK_WIDTH &&
                     blockGrid[i][j] == 1) printf("□ ");
+            // 消えるブロック
             else if(0 <= i && i < BLOCK_HEIGHT && 
                     0 <= j && j < BLOCK_WIDTH &&
                     blockGrid[i][j] == 2) printf("＊");
+            // ミノ
             else if( (0 <= x && x < mino.width) && 
                     (0 <= y && y <  mino.width) &&
                     mino.grid[( y )  * mino.width + x]) printf("◆ ");
+            // 落下予測
+            else if( situation == FALLING && (0 <= x && x < mino.width) && 
+                    (0 <= y - dist && y - dist <  mino.width) &&
+                    mino.grid[( y - dist )  * mino.width + x]) printf("◇ ");
             else printf("  "); 
+        }
+        // nextミノの表示
+        if(i == 0) printf("  N e x t");
+        if(1 <= i && i < 1 + next.width){
+            printf(" ");
+            for(int j = 0;j < next.width;j++){
+                if(next.grid[(i - 1) * next.width + j]) printf("◆ ");
+                else printf("  ");
+            }
+        }
+        // nextミノの表示
+        if(i == 7) printf("  S a v e");
+        if(8 <= i && i < 8 + save.width){
+            printf(" ");
+            for(int j = 0;j < save.width;j++){
+                if(save.grid[(i - 8) * save.width + j]) printf("◆ ");
+                else printf("  ");
+            }
         }
         printf("\n");
     }
@@ -266,20 +343,6 @@ void ccwRotate(){
     mino.y_min = n - xmax;
     mino.y_max = n - xmin;
 }
-// ミノをdx,dyだけ動かした場合に、壁やブロックと重なるかどうか判定
-int  checkMinoOver(int dx,int dy){
-    for(int i = 0;i < mino.width;i++){
-        for(int j = 0;j < mino.width;j++){
-            if(!mino.grid[i*mino.width + j]) continue;
-            int y = mino.y + i + dy;
-            int x = mino.x + j + dx;
-            if(x < 0 || BLOCK_WIDTH <= x) return 1;
-            if(y >= BLOCK_HEIGHT) return 1;
-            if(blockGrid[y][x]) return 1;
-        }
-    }
-    return 0;
-}
 void checkMinoClls(){
     // ミノが他のブロックや壁に衝突した場合に修正する
     if(mino.x + mino.x_min < 0) mino.x += 1;
@@ -315,6 +378,7 @@ void checkDeleteMino(){
             }
         }
         if(flag) {
+            game_counter = 1;
             situation = DELETING;
             deletedFlag[i] = 1;
             for(int j = 0;j < BLOCK_WIDTH;j++) blockGrid[i][j] = 2;
@@ -336,6 +400,44 @@ void deleteMino(){
             blockGrid[i][j] = 0;
         }
     }
+    score += cnt * cnt * 1000;
+    saveScore();
+}
+void updateRandomMino(){
+    static Mino* minos[7] = {&imino,&omino,&tmino,&jmino,&lmino,&smino,&zmino};
+    int idx = rand() % 7;
+    copyMino(&mino,&next);
+    copyMino(&next,minos[idx]);
+}
+void resetMinoPosition(){
+    mino.x = BLOCK_WIDTH / 2 - (mino.width / 2);
+    mino.y = -mino.y_min;
+
+    if(checkMinoOver(0,0)) situation = GAMEOVER;
+}
+void resetMino(){
+    changeMinoFlag = 0;
+    game_counter = 1;
+    updateRandomMino();
+    
+    resetMinoPosition();
+}
+void saveMino(){
+    changeMinoFlag = 1;
+    game_counter = 1;
+
+    if(save.width == -1){
+        copyMino(&save,&mino);
+        updateRandomMino();
+    }
+    // mino と　save を　swap
+    else {
+        Mino tem;
+        copyMino(&tem,&mino);
+        copyMino(&mino,&save);
+        copyMino(&save,&tem);
+    }
+    resetMinoPosition();
 }
 void moveMino(){
     //落下
@@ -358,36 +460,22 @@ void moveMino(){
     }
     //強制落下
     if(c == ' ') {
-        int counter = 0;
-        while(1){
-            if(checkMinoOver(0,counter)) break;
-            counter++;
-        }
+        int dist = getDistanceToLand();
         situation = LANDING;
-        mino.y += counter - 1;
+        mino.y += dist;
         stopMino();
         checkDeleteMino();
         return ;
     }
     if(c == 'j') ccwRotate();
     if(c == 'k') cwRotate();
+    if( (c == 'x' || c == 'u') && !changeMinoFlag) saveMino();
 }
-void resetMino(){
-    game_counter = 1;
-    static Mino* minos[7] = {&imino,&omino,&tmino,&jmino,&lmino,&smino,&zmino};
 
-    int idx = rand() % 7;
-    copyMino(&mino,minos[idx]);
-    mino.x = BLOCK_WIDTH / 2 - (mino.width / 2);
-    mino.y = -mino.y_min;
-    debug_msg[2] = mino.y_min;
-
-    if(checkMinoOver(0,0)) situation = GAMEOVER;
-
-}
 int main(void){
     initializeAllMino();
     srand(time(NULL));
+    readScore();
 
     int cnt = 0;
     copyMino(&mino,&tmino);
@@ -398,7 +486,6 @@ int main(void){
             case RESETTING:
                 situation = FALLING;
                 resetMino();
-                debug_msg[0] += 1;
                 break;
             case LANDING:
                 // if(game_counter == 0) situation = RESETTING;
@@ -421,13 +508,8 @@ int main(void){
         }
 
         printGame();
-        printf("   counter : %d\n",cnt++);
-        printf("   x : %d, y : %d\n",mino.x,mino.y);
-        printf("   ");
-        for(int i = 0;i < 10;i++){
-            printf("%d ",debug_msg[i]);
-        }
-        printf("\n");
+        printf("   score      : %d\n",score);
+        printf("   high score : %d\n",highScore);
         usleep(SYSTEM_CYCLE);
     }
 

@@ -57,6 +57,7 @@ typedef struct mino{
 } Mino;
 // player
 Mino mino;
+Mino next;
 // template
 Mino imino;
 Mino omino;
@@ -152,7 +153,8 @@ void initializeAllMino(){
         };
         initializeMino(&zmino,grid,3);
     }
-
+    // next
+    resetMino();
 }
 void copyMino(Mino* a,Mino* b){
     a->width = b->width;
@@ -186,6 +188,7 @@ void printGame(){
                     mino.grid[( y )  * mino.width + x]) printf("◆ ");
             else printf("  "); 
         }
+
         printf("\n");
     }
 }
@@ -376,9 +379,9 @@ void moveMino(){
 void resetMino(){
     game_counter = 1;
     static Mino* minos[7] = {&imino,&omino,&tmino,&jmino,&lmino,&smino,&zmino};
-
     int idx = rand() % 7;
-    copyMino(&mino,minos[idx]);
+    copyMino(&mino,&next);
+    copyMino(&next,minos[idx]);
     mino.x = BLOCK_WIDTH / 2 - (mino.width / 2);
     mino.y = -mino.y_min;
     debug_msg[2] = mino.y_min;
